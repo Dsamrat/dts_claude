@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "785699425592",
+    "project_id": "deliverytrack-80524",
+    "storage_bucket": "deliverytrack-80524.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:785699425592:android:f2a2cec7cb36c21faf85cd",
+        "android_client_info": {
+          "package_name": "com.example.deliverytrackingapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGMGmPhJTOU8AgqZYiJt9JPYdsnDng43w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:785699425592:android:a3b0b29b980bc39caf85cd",
+        "android_client_info": {
+          "package_name": "com.example.dts"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGMGmPhJTOU8AgqZYiJt9JPYdsnDng43w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

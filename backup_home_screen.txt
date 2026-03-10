@@ -1,0 +1,488 @@
+import 'package:dts/screens/pick_home_screen.dart';
+import 'package:dts/screens/driver_home_screen.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+//BROADCASTING
+
+import 'package:web_socket_channel/io.dart';
+import 'dart:convert';
+// LOAD WIDGETS
+import 'package:dts/widgets/navbar.dart';
+import 'package:dts/widgets/background_allscreen.dart';
+import 'package:dts/widgets/drawer.dart';
+
+// LOAD INVOICES DEPENDENCIES
+import '../models/filter_option.dart';
+import '../models/invoice.dart';
+import '../services/invoice_service.dart';
+
+// LOAD BRANCHES DEPENDENCIES
+import '../models/branch.dart';
+import '../services/branch_service.dart';
+//import 'package:dts/widgets/home_widgets/branch_dropdown.dart';
+
+import '../widgets/custom_dropdown.dart';
+import '../widgets/input.dart';
+
+import 'invoice_det.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int? isPickupTeam;
+  int? isMultiBranch;
+  int? userBranchId;
+  int? userDepartmentId;
+  //BROADCASTING
+  late IOWebSocketChannel channel;
+  // List<Map<String, dynamic>> branchOptions = []; // Static branch list
+  List<Branch> branchesDrop = [];
+  List<Map<String, dynamic>> groupByOptions = [];
+  // List<String> filterOptions = [];
+  List<FilterOption> filterOptions = [];
+  FilterOption? selectedFilter;
+
+  // int selectedFilter = 0;
+  String selectedGroup = 'Invoice';
+  int? selectedBranchId;
+
+  List<Invoice> invoices = [];
+  int currentPage = 1;
+  bool isLoading = false;
+
+  final ScrollController scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+
+  final InvoiceService _invoiceService = InvoiceService();
+  final BranchService _branchService = BranchService();
+
+  final Map<String, Map<int, String>> departmentFilters = {
+    'isPickupTeam': {0: 'All', 2: 'Ready for Picking', 3: 'Ready for Loading'},
+    'others': {
+      0: 'Delivery in Progress',
+      1: 'Waiting for Delivery',
+      2: 'Ready for Picking',
+      3: 'Ready for Loading',
+      4: 'Loaded',
+      5: 'Out for Delivery',
+      6: 'Delivery Completed',
+      7: 'Canceled',
+    },
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    /*loadUserDetails().then((_) {
+      fetchInvoices(); // Ensure this runs only after user details are loaded
+    });*/
+    /* BROADCASTING*/
+    // Connect to WebSocket server
+    channel = IOWebSocketChannel.connect(
+      'ws://localhost:6001/app/local?protocol=7&client=js&version=4.4.0&flash=false',
+    );
+
+    // Listen for incoming WebSocket messages
+    channel.stream.listen((message) {
+      final decoded = jsonDecode(message);
+
+      if (decoded['event'] == 'invoice.created') {
+        /*final data = jsonDecode(
+          decoded['data'],
+        ); // Laravel wraps data as string
+        setState(() {
+          invoices.insert(0, data); // Insert latest invoice at top
+        });*/
+        //HERE I JUST WANT TO PUSH ALL INVOICE AGAIN. NO NEED TO INSERT INTO INVOICES
+        fetchInvoices();
+      }
+    });
+
+    // Optionally: Load initial invoices from API
+
+    /* BROADCASTING*/
+    loadUserDetails(); // Just call the async function
+
+    scrollController.addListener(() {
+      if (scrollController.position.pixels >=
+              scrollController.position.maxScrollExtent - 50 &&
+          !isLoading) {
+        currentPage++;
+        fetchInvoices();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    channel.sink.close();
+    super.dispose();
+  }
+
+  Future<void> loadUserDetails() async {
+    if (kDebugMode) {
+      print('Reached loadUserDetails');
+    }
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    isPickupTeam = prefs.getInt('isPickupTeam');
+    isMultiBranch = prefs.getInt('multiBranch');
+    userBranchId = prefs.getInt('branchId');
+    userDepartmentId = prefs.getInt('departmentId');
+    selectedBranchId = userBranchId;
+    if (kDebugMode) {
+      print('➡️ isPickupTeam $isPickupTeam');
+      print('➡️ isMultiBranch: $isMultiBranch');
+      print('➡️ userBranchId: $userBranchId');
+    }
+    /*if (isPickupTeam == 1) {
+      // Redirect to the PickupListScreen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const PickHomeScreen()),
+      );
+      return; // Prevent further execution in this method
+    }*/
+    if (userDepartmentId == 2) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const PickHomeScreen()),
+        );
+      });
+      return;
+    }
+    if (userDepartmentId == 7) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const DriverHomeScreen()),
+        );
+      });
+      return;
+    }
+
+    bool isPickup = isPickupTeam == 1;
+    final filters =
+        isPickup
+            ? departmentFilters['isPickupTeam']!
+            : departmentFilters['others']!;
+
+    setState(() {
+      filterOptions =
+          filters.entries
+              .map((e) => FilterOption(key: e.key, label: e.value))
+              .toList();
+
+      selectedFilter = filterOptions.firstWhere(
+        (f) => f.key == (isPickup ? 0 : 0),
+        orElse: () => filterOptions.first,
+      );
+    });
+
+    /* final filters =
+        isPickup
+            ? departmentFilters['isPickupTeam']!
+            : departmentFilters['others']!;*/
+
+    if (isMultiBranch == 1) {
+      branchesDrop = await _branchService.getBranches();
+    }
+
+    if (isPickupTeam == 1) {
+      groupByOptions = [
+        {"id": "Invoice", "name": "Invoice"},
+        {"id": "Trip", "name": "Trip"},
+        {"id": "Item", "name": "Item"},
+      ];
+    }
+    /*setState(() {
+      filterOptions = filters.values.toList();
+      selectedFilter = isPickup ? 0 : 1;
+      // selectedBranchId = userBranchId; // default selected branch
+    });*/
+    // 🟢 Only run this if NOT pickup team
+    fetchInvoices();
+  }
+
+  /*Future<void> fetchInvoices() async {
+    final newInvoices = await InvoiceService.getInvoices(query: searchQuery, page: currentPage);
+
+    print("Fetched ${newInvoices.length} invoices from API");
+    invoices.addAll(newInvoices);
+    print("Total invoices in list: ${invoices.length}");
+
+    setState(() {});
+  }*/
+  Future<void> fetchInvoices() async {
+    setState(() => isLoading = true);
+    final newInvoices = await _invoiceService.getInvoices(
+      filter: selectedFilter?.key.toString() ?? '0',
+      page: currentPage,
+      isPickup: isPickupTeam == 1,
+      isMultiBranch: isMultiBranch,
+      userBranchId: userBranchId,
+      search: _searchController.text,
+      groupBy: selectedGroup,
+    );
+    // invoices.addAll(newInvoices);
+    for (var invoice in newInvoices) {
+      if (!invoices.any((inv) => inv.id == invoice.id)) {
+        invoices.add(invoice);
+      }
+    }
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  /*void onSearchChanged(String query) {
+    currentPage = 1;
+    invoices.clear();
+    fetchInvoices();
+  }*/
+  void onSearchChanged(String query) {
+    setState(() {
+      currentPage = 1;
+      invoices.clear();
+    });
+    fetchInvoices();
+  }
+
+  void openInvoiceDet({Invoice? invoice}) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => InvoiceDet(invoice: invoice)),
+    );
+    fetchInvoices();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: Navbar(transparent: true, title: "Dashboard"),
+      extendBodyBehindAppBar: true,
+      drawer: ArgonDrawer(currentPage: "Home"),
+      body: Stack(
+        children: [
+          backgroundAllScreen(),
+          Column(
+            children: [
+              const SizedBox(height: 80),
+              if (filterOptions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+                  child: CustomDropdown<FilterOption>(
+                    label: "Filter by Status",
+                    items: filterOptions,
+                    selectedItem: selectedFilter,
+                    onChanged: (option) {
+                      if (option != null) {
+                        setState(() {
+                          selectedFilter = option;
+                          currentPage = 1;
+                          invoices.clear();
+                        });
+                        fetchInvoices();
+                      }
+                    },
+                    getLabel: (option) => option.label,
+                  ),
+                ),
+
+              // Show branch dropdown if multi-branch
+              if (isMultiBranch == 1)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: CustomDropdown<Branch>(
+                    label: "Select Branch",
+                    items: branchesDrop,
+                    selectedItem: branchesDrop.firstWhere(
+                      (b) => b.id == selectedBranchId,
+                      orElse: () => Branch(id: 0, name: 'Select'),
+                    ),
+                    onChanged: (branch) {
+                      if (branch != null) {
+                        setState(() {
+                          userBranchId = branch.id;
+                          selectedBranchId = branch.id;
+                          currentPage = 1;
+                          invoices.clear();
+                        });
+                        fetchInvoices();
+                      }
+                    },
+                    getLabel: (branch) => branch.name,
+                  ),
+                ),
+
+              //Show GROUP BY dropdown if isPickupTeam
+              if (isPickupTeam == 1)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: CustomDropdown<String>(
+                    label: "Group By",
+                    items:
+                        groupByOptions.map((e) => e['id'] as String).toList(),
+                    selectedItem: selectedGroup,
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          selectedGroup = value;
+                          currentPage = 1;
+                          invoices.clear();
+                        });
+                        fetchInvoices();
+                      }
+                    },
+                    getLabel: (id) {
+                      final item = groupByOptions.firstWhere(
+                        (e) => e['id'] == id,
+                      );
+                      return item['name'];
+                    },
+                  ),
+                ),
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Input(
+                  placeholder: 'Search by invoice number...',
+                  prefixIcon: const Icon(Icons.search),
+                  controller: _searchController,
+                  onChanged: onSearchChanged,
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: invoices.length,
+                  itemBuilder: (context, index) {
+                    final invoice = invoices[index];
+                    return ListTile(
+                      title: Row(
+                        children: [
+                          // Column 1: Invoice Number
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              invoice.invoiceNum,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+
+                          // Column 2: Flags (H and COD)
+                          Expanded(
+                            flex: 2,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: [
+                                if (invoice.hardCopy == '1')
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'H',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                if (invoice.hardCopy == '1' &&
+                                    invoice.codFlag == '1')
+                                  const SizedBox(width: 6),
+                                if (invoice.codFlag == '1')
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'COD',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+
+                          // Column 3: Empty or right-aligned content if needed later
+                          const Expanded(
+                            flex: 1,
+                            child:
+                                SizedBox(), // You can add action buttons/icons here
+                          ),
+                        ],
+                      ),
+
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            invoice.customerName,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          if (invoice.eComOrderID.isNotEmpty)
+                            Text(
+                              "Order ID: ${invoice.eComOrderID}",
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          Text(
+                            invoice.invoiceStatus,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ],
+                      ),
+
+                      /*trailing: const Icon(
+                        Icons.arrow_forward_ios,
+                        color: Colors.white,
+                      ),*/
+                      trailing: IconButton(
+                        icon: Icon(
+                          Icons.arrow_forward_ios,
+                          color: Colors.white,
+                        ),
+                        onPressed: () => openInvoiceDet(invoice: invoice),
+                      ),
+
+                      /*IconButton(
+                        icon: const Icon(Icons.arrow_forward_ios),
+                        color: Theme.of(context).iconTheme.color,
+                        onPressed: () => openForm(branch: branch),
+                      ),*/
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
